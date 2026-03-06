@@ -1,0 +1,23 @@
+{
+  "name": "sapere-backend",
+  "version": "1.0.0",
+  "description": "Sapere audio-documentary backend with BullMQ async workers",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "concurrently \"node src/index.js\" \"node src/worker.js\"",
+    "start:api": "node src/index.js",
+    "start:worker": "node src/worker.js"
+  },
+  "dependencies": {
+    "bullmq": "^5.4.2",
+    "concurrently": "^8.2.2",
+    "express": "^4.18.2",
+    "firebase-admin": "^12.0.0",
+    "ioredis": "^5.3.2",
+    "node-fetch": "^2.7.0",
+    "uuid": "^9.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
