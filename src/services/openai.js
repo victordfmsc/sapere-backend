@@ -12,7 +12,7 @@ async function generateTitle(prompt, genre) {
       model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: 'You are a creative title generator for audio documentaries. Generate ONLY the title, nothing else. No quotes, no extra text.' },
-        { role: 'user', content': `Generate the title in Spanish language for a ${genre} documentary about: ${prompt}` }
+        { role: 'user', content: `Generate the title in Spanish language for a ${genre} documentary about: ${prompt}` }
       ],
       max_tokens: 100,
       temperature: 0.9,
