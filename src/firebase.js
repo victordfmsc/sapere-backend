@@ -13,9 +13,16 @@ function initFirebase() {
       console.log('[Firebase] Using FIREBASE_SERVICE_ACCOUNT JSON');
     } else {
       // Option 2: Individual env vars
-      const privateKey = process.env.FIREBASE_PRIVATE_KEY
-        ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-        : undefined;
+      let privateKey = process.env.FIREBASE_PRIVATE_KEY || '';
+      // Handle the literal "\n" string that sometimes gets passed from env vars
+      if (privateKey.includes('\\n')) {
+        privateKey = privateKey.replace(/\\n/g, '\n');
+      }
+      // If it's wrapped in quotes, remove them
+      if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+        privateKey = privateKey.slice(1, -1);
+      }
+
       credential = admin.credential.cert({
         projectId: process.env.FIREBASE_PROJECT_ID,
         clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
