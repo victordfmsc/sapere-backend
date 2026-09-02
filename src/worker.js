@@ -3,7 +3,6 @@ const { connection } = require('./queues');
 const { initFirebase, getDb, getStorage } = require('./firebase');
 const { generateTitle, generateScript } = require('./services/openai');
 const { generateAudio } = require('./services/elevenlabs');
-const { generateCover } = require('./services/imageGen');
 const { sanitizeError } = require('./env');
 
 initFirebase();
@@ -25,21 +24,6 @@ const worker = new Worker('generate', async (job) => {
   const storage = getStorage();
 
   try {
-    if (jobType === 'generate-cover') {
-      await docRef.update({ status: 'generating_cover', updatedAt: new Date() });
-      const coverBuffer = await generateCover(prompt, type);
-      const coverUrl = await uploadPublic(storage, `sapere/${documentId}/cover.jpg`, coverBuffer, 'image/jpeg');
-
-      await docRef.update({
-        newCover: coverUrl,
-        coverImage: coverUrl,
-        status: 'completed',
-        updatedAt: new Date(),
-      });
-      console.log(`[Worker] ${documentId}: cover generated and updated`);
-      return;
-    }
-
     // Default: generate-documentary
     // Step 1: Started
     await docRef.update({ status: 'started', updatedAt: new Date() });
@@ -57,25 +41,10 @@ const worker = new Worker('generate', async (job) => {
     await docRef.update({ description: paragraphs, updatedAt: new Date() });
     console.log(`[Worker] ${documentId}: script generated (${paragraphs.length} paragraphs)`);
 
-    // Step 4: Generate Media (parallel). La portada es opcional: si falla no se pierde el audio.
+    // Step 4: Generate audio. La portada la elige el usuario en la app; el backend no la toca.
     await docRef.update({ status: 'generating_media', updatedAt: new Date() });
-
-    const fullText = paragraphs.join('\n\n');
-    const [audioResult, coverResult] = await Promise.allSettled([
-      generateAudio(fullText, { voiceId }),
-      generateCover(prompt, type),
-    ]);
-
-    if (audioResult.status === 'rejected') throw audioResult.reason;
-
-    const audioUrl = await uploadPublic(storage, `sapere/${documentId}/audio.mp3`, audioResult.value, 'audio/mpeg');
-
-    let coverUrl = null;
-    if (coverResult.status === 'fulfilled') {
-      coverUrl = await uploadPublic(storage, `sapere/${documentId}/cover.jpg`, coverResult.value, 'image/jpeg');
-    } else {
-      console.warn(`[Worker] ${documentId}: cover skipped - ${sanitizeError(coverResult.reason)}`);
-    }
+    const audioBuffer = await generateAudio(paragraphs.join('\n\n'), { voiceId });
+    const audioUrl = await uploadPublic(storage, `sapere/${documentId}/audio.mp3`, audioBuffer, 'audio/mpeg');
 
     console.log(`[Worker] ${documentId}: media generated`);
 
@@ -83,7 +52,6 @@ const worker = new Worker('generate', async (job) => {
     await docRef.update({
       status: 'completed',
       bukbukUrl: audioUrl,
-      ...(coverUrl ? { newCover: coverUrl, coverImage: coverUrl } : {}),
       errorMessage: null,
       updatedAt: new Date(),
     });

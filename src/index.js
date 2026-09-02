@@ -95,25 +95,6 @@ app.post('/v1/api/sapere/prompt', async (req, res) => {
   app.handle(req, res);
 });
 
-// Support for generate-cover only
-app.post('/v1/api/sapere/generate-cover', async (req, res) => {
-  try {
-    const { docId, prompt, type = 'documentary', uId } = req.body;
-
-    await generateQueue.add('generate-cover', {
-      documentId: docId,
-      prompt,
-      type,
-      userId: uId,
-    });
-
-    res.status(202).json({ status: 'accepted', documentId: docId });
-  } catch (error) {
-    console.error('[API] Error triggering cover:', sanitizeError(error));
-    res.status(500).json({ error: sanitizeError(error) });
-  }
-});
-
 // Support for status check
 app.get('/v1/api/sapere/upload-audio-status/:uid', async (req, res) => {
   try {

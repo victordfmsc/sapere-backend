@@ -8,7 +8,7 @@ Backend asíncrono para generación de audio-documentales con BullMQ y Firebase.
 - **BullMQ Worker**: Procesador async de documentales
 - **Redis**: Cola de trabajos
 - **Firebase**: Base de datos Firestore + Storage
-- **APIs externas**: OpenAI GPT-4o-mini, ElevenLabs TTS, HuggingFace FLUX
+- **APIs externas**: OpenAI GPT-4o-mini, ElevenLabs TTS (la portada la elige el usuario en la app)
 
 ## Deployment en Railway
 
@@ -40,7 +40,6 @@ Backend asíncrono para generación de audio-documentales con BullMQ y Firebase.
 ```
 OPENAI_API_KEY=sk-...
 ELEVENLABS_API_KEY=...
-HF_TOKEN=hf_...
 FIREBASE_PROJECT_ID=sapere-f7150
 FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxx@sapere-f7150.iam.gserviceaccount.com
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
@@ -112,7 +111,6 @@ src/
 └── services/
     ├── openai.js     # Generación de título y guión
     ├── elevenlabs.js # Síntesis de voz
-    └── imageGen.js   # Generación de portadas
 ```
 
 ## Estados de generación
@@ -123,7 +121,7 @@ El worker actualiza el campo `status` en Firestore progresivamente:
 2. `started` → Worker procesando
 3. `generating_title` → Generando título
 4. `generating_script` → Generando guión
-5. `generating_media` → Generando audio + portada
+5. `generating_media` → Generando audio
 6. `completed` → Finalizado con éxito
 7. `error` → Error (+ campo `errorMessage`)
 
