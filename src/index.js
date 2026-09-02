@@ -2,6 +2,7 @@ const express = require('express');
 const { initFirebase, getDb } = require('./firebase');
 const { generateQueue } = require('./queues');
 const { generateTitle } = require('./services/openai');
+const { sanitizeError } = require('./env');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,11 +32,11 @@ app.post('/generate', async (req, res) => {
       await docRef.update({
         uId: finalUserId,
         status: 'pending',
+        errorMessage: null,
         prompt,
         genre,
-        type,
-        language: rest.language || 'Spanish',
-        languageCode: rest.languageCode || 'es_ES',
+        ...(rest.language ? { language: rest.language } : {}),
+        ...(rest.languageCode ? { languageCode: rest.languageCode } : {}),
         bukbukId: rest.bukbukId || '',
         bukbukCategoryId: rest.bukbukCategoryId || '',
         bukbukTypeNames: rest.bukbukTypeNames || {},
@@ -75,8 +76,8 @@ app.post('/generate', async (req, res) => {
 
     res.status(202).json({ status: 'accepted', documentId: docRef.id });
   } catch (error) {
-    console.error('[API] Error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('[API] Error:', sanitizeError(error));
+    res.status(500).json({ error: sanitizeError(error) });
   }
 });
 
@@ -108,8 +109,8 @@ app.post('/v1/api/sapere/generate-cover', async (req, res) => {
 
     res.status(202).json({ status: 'accepted', documentId: docId });
   } catch (error) {
-    console.error('[API] Error triggering cover:', error);
-    res.status(500).json({ error: error.message });
+    console.error('[API] Error triggering cover:', sanitizeError(error));
+    res.status(500).json({ error: sanitizeError(error) });
   }
 });
 
@@ -120,31 +121,38 @@ app.get('/v1/api/sapere/upload-audio-status/:uid', async (req, res) => {
     const db = getDb();
 
     // Check if there are any pending or started jobs for this user
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
     const snapshot = await db.collection('sapere')
       .where('uId', '==', uid)
       .where('status', 'in', ['pending', 'started', 'generating_title', 'generating_script', 'generating_media'])
-      .limit(1)
       .get();
 
-    if (!snapshot.empty) {
+    // Filter by timestamp manually if needed, or refine query
+    const activeJobs = snapshot.docs.filter(doc => {
+      const data = doc.data();
+      const updatedAt = data.updatedAt ? data.updatedAt.toDate() : (data.publishTime ? data.publishTime.toDate() : new Date(0));
+      return updatedAt > fifteenMinutesAgo;
+    });
+
+    if (activeJobs.length > 0) {
       res.status(200).json({ status: 'busy' });
     } else {
       res.status(404).json({ status: 'idle' });
     }
   } catch (error) {
-    console.error('[API] Error checking status:', error);
-    res.status(500).json({ error: error.message });
+    console.error('[API] Error checking status:', sanitizeError(error));
+    res.status(500).json({ error: sanitizeError(error) });
   }
 });
 
 app.post('/generate/title', async (req, res) => {
   try {
-    const { input, genre } = req.body;
-    const title = await generateTitle(input, genre);
+    const { input, genre, language } = req.body;
+    const title = await generateTitle(input, genre, language);
     res.json({ title });
   } catch (error) {
-    console.error('[API] Error generating title:', error);
-    res.status(500).json({ error: error.message });
+    console.error('[API] Error generating title:', sanitizeError(error));
+    res.status(500).json({ error: sanitizeError(error) });
   }
 });
 

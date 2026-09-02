@@ -4,11 +4,19 @@ const { initFirebase, getDb, getStorage } = require('./firebase');
 const { generateTitle, generateScript } = require('./services/openai');
 const { generateAudio } = require('./services/elevenlabs');
 const { generateCover } = require('./services/imageGen');
+const { sanitizeError } = require('./env');
 
 initFirebase();
 
+async function uploadPublic(storage, path, buffer, contentType) {
+  const file = storage.file(path);
+  await file.save(buffer, { contentType });
+  await file.makePublic();
+  return `https://storage.googleapis.com/${storage.name}/${file.name}`;
+}
+
 const worker = new Worker('generate', async (job) => {
-  const { documentId, prompt, genre, type, systemPrompt } = job.data;
+  const { documentId, prompt, genre, type, systemPrompt, voiceId, language } = job.data;
   const jobType = job.name;
 
   console.log(`[Worker] Processing job "${jobType}" for doc ${documentId}`);
@@ -18,18 +26,15 @@ const worker = new Worker('generate', async (job) => {
 
   try {
     if (jobType === 'generate-cover') {
-      await docRef.update({ status: 'generating_cover' });
+      await docRef.update({ status: 'generating_cover', updatedAt: new Date() });
       const coverBuffer = await generateCover(prompt, type);
-
-      const coverFile = storage.file(`sapere/${documentId}/cover.jpg`);
-      await coverFile.save(coverBuffer, { contentType: 'image/jpeg' });
-      await coverFile.makePublic();
-      const coverUrl = `https://storage.googleapis.com/${storage.name}/${coverFile.name}`;
+      const coverUrl = await uploadPublic(storage, `sapere/${documentId}/cover.jpg`, coverBuffer, 'image/jpeg');
 
       await docRef.update({
         newCover: coverUrl,
         coverImage: coverUrl,
-        status: 'completed'
+        status: 'completed',
+        updatedAt: new Date(),
       });
       console.log(`[Worker] ${documentId}: cover generated and updated`);
       return;
@@ -37,42 +42,40 @@ const worker = new Worker('generate', async (job) => {
 
     // Default: generate-documentary
     // Step 1: Started
-    await docRef.update({ status: 'started' });
+    await docRef.update({ status: 'started', updatedAt: new Date() });
     console.log(`[Worker] ${documentId}: started`);
 
     // Step 2: Generate Title
-    await docRef.update({ status: 'generating_title' });
-    const title = await generateTitle(prompt, genre);
-    await docRef.update({ bukbukName: title });
+    await docRef.update({ status: 'generating_title', updatedAt: new Date() });
+    const title = await generateTitle(prompt, genre, language);
+    await docRef.update({ bukbukName: title, updatedAt: new Date() });
     console.log(`[Worker] ${documentId}: title generated - ${title}`);
 
     // Step 3: Generate Script
-    await docRef.update({ status: 'generating_script' });
+    await docRef.update({ status: 'generating_script', updatedAt: new Date() });
     const { paragraphs } = await generateScript(prompt, type, systemPrompt);
-    await docRef.update({ description: paragraphs });
+    await docRef.update({ description: paragraphs, updatedAt: new Date() });
     console.log(`[Worker] ${documentId}: script generated (${paragraphs.length} paragraphs)`);
 
-    // Step 4: Generate Media (parallel)
-    await docRef.update({ status: 'generating_media' });
+    // Step 4: Generate Media (parallel). La portada es opcional: si falla no se pierde el audio.
+    await docRef.update({ status: 'generating_media', updatedAt: new Date() });
 
-    // Generate audio & cover in parallel
     const fullText = paragraphs.join('\n\n');
-    const [audioBuffer, coverBuffer] = await Promise.all([
-      generateAudio(fullText),
+    const [audioResult, coverResult] = await Promise.allSettled([
+      generateAudio(fullText, { voiceId }),
       generateCover(prompt, type),
     ]);
 
-    // Upload audio to Firebase Storage
-    const audioFile = storage.file(`sapere/${documentId}/audio.mp3`);
-    await audioFile.save(audioBuffer, { contentType: 'audio/mpeg' });
-    await audioFile.makePublic();
-    const audioUrl = `https://storage.googleapis.com/${storage.name}/${audioFile.name}`;
+    if (audioResult.status === 'rejected') throw audioResult.reason;
 
-    // Upload cover to Firebase Storage
-    const coverFile = storage.file(`sapere/${documentId}/cover.jpg`);
-    await coverFile.save(coverBuffer, { contentType: 'image/jpeg' });
-    await coverFile.makePublic();
-    const coverUrl = `https://storage.googleapis.com/${storage.name}/${coverFile.name}`;
+    const audioUrl = await uploadPublic(storage, `sapere/${documentId}/audio.mp3`, audioResult.value, 'audio/mpeg');
+
+    let coverUrl = null;
+    if (coverResult.status === 'fulfilled') {
+      coverUrl = await uploadPublic(storage, `sapere/${documentId}/cover.jpg`, coverResult.value, 'image/jpeg');
+    } else {
+      console.warn(`[Worker] ${documentId}: cover skipped - ${sanitizeError(coverResult.reason)}`);
+    }
 
     console.log(`[Worker] ${documentId}: media generated`);
 
@@ -80,16 +83,19 @@ const worker = new Worker('generate', async (job) => {
     await docRef.update({
       status: 'completed',
       bukbukUrl: audioUrl,
-      newCover: coverUrl,
-      coverImage: coverUrl,
+      ...(coverUrl ? { newCover: coverUrl, coverImage: coverUrl } : {}),
+      errorMessage: null,
+      updatedAt: new Date(),
     });
 
     console.log(`[Worker] ${documentId}: completed successfully`);
   } catch (error) {
-    console.error(`[Worker] ${documentId}: ERROR [${jobType}] -`, error);
+    const message = sanitizeError(error);
+    console.error(`[Worker] ${documentId}: ERROR [${jobType}] - ${message}`);
     await docRef.update({
       status: 'error',
-      errorMessage: error.message,
+      errorMessage: message,
+      updatedAt: new Date(),
     });
   }
 }, { connection });
@@ -99,7 +105,7 @@ worker.on('completed', (job) => {
 });
 
 worker.on('failed', (job, err) => {
-  console.error(`[Worker] Job ${job.id} failed:`, err.message);
+  console.error(`[Worker] Job ${job && job.id} failed:`, sanitizeError(err));
 });
 
 console.log('[Worker] Started and listening for jobs...');
