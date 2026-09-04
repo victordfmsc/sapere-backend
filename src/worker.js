@@ -72,6 +72,19 @@ worker.on('completed', (job) => {
   console.log(`[Worker] Job ${job.id} completed`);
 });
 
-worker.on('failed', async (job, err) => {  console.error(`[Worker] Job ${job && job.id} failed:`, sanitizeError(err));  const documentId = job && job.data && job.data.documentId;  if (!documentId) return;  try {    await getDb().collection('sapere').doc(documentId).update({      status: 'error',      errorMessage: sanitizeError(err),      updatedAt: new Date(),    });  } catch (e) {    console.error(`[Worker] could not mark ${documentId} as error:`, sanitizeError(e));  }});
+worker.on('failed', async (job, err) => {
+  console.error(`[Worker] Job ${job && job.id} failed:`, sanitizeError(err));
+  const documentId = job && job.data && job.data.documentId;
+  if (!documentId) return;
+  try {
+    await getDb().collection('sapere').doc(documentId).update({
+      status: 'error',
+      errorMessage: sanitizeError(err),
+      updatedAt: new Date(),
+    });
+  } catch (e) {
+    console.error(`[Worker] could not mark ${documentId} as error:`, sanitizeError(e));
+  }
+});
 
 console.log('[Worker] Started and listening for jobs...');
