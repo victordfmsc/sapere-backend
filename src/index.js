@@ -3,7 +3,7 @@ const { initFirebase, getDb } = require('./firebase');
 const { generateQueue } = require('./queues');
 const { generateTitle } = require('./services/openai');
 const { sanitizeError } = require('./env');
-const revenuecat = require('./revenuecat');
+const { registerCreditRoutes } = require('./credits');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -127,64 +127,7 @@ app.get('/v1/api/sapere/upload-audio-status/:uid', async (req, res) => {
   }
 });
 
-// --- Créditos: RevenueCat Virtual Currency (con reserva heredada en users.credits) ---
-
-async function legacyCredits(db, uid) {
-  const snap = await db.collection('users').doc(uid).get();
-  const value = snap.exists ? snap.data().credits : 0;
-  return Number.isFinite(Number(value)) ? Math.max(0, Math.trunc(Number(value))) : 0;
-}
-
-app.get('/v1/api/credits/balance/:uid', async (req, res) => {
-  try {
-    const { uid } = req.params;
-    const db = getDb();
-    const [rc, legacy] = await Promise.all([
-      revenuecat.isEnabled() ? revenuecat.getBalance(uid) : Promise.resolve(0),
-      legacyCredits(db, uid),
-    ]);
-    res.json({ revenuecat: rc, legacy, total: rc + legacy, revenuecatEnabled: revenuecat.isEnabled() });
-  } catch (error) {
-    console.error('[API] Error reading credits:', sanitizeError(error));
-    res.status(500).json({ error: sanitizeError(error) });
-  }
-});
-
-app.post('/v1/api/credits/spend', async (req, res) => {
-  try {
-    const uid = req.body.uId || req.body.userId;
-    if (!uid) return res.status(400).json({ ok: false, error: 'uId required' });
-    const db = getDb();
-
-    if (revenuecat.isEnabled()) {
-      const balance = await revenuecat.getBalance(uid);
-      if (balance >= 1) {
-        await revenuecat.adjustBalance(uid, -1);
-        console.log(`[API] credit spent (revenuecat) for ${uid}: ${balance} -> ${balance - 1}`);
-        return res.json({ ok: true, source: 'revenuecat', balance: balance - 1 });
-      }
-    }
-
-    const docRef = db.collection('users').doc(uid);
-    const result = await db.runTransaction(async (tx) => {
-      const snap = await tx.get(docRef);
-      if (!snap.exists) return null;
-      const current = Number(snap.data().credits) || 0;
-      if (current < 1) return null;
-      tx.update(docRef, { credits: current - 1 });
-      return current - 1;
-    });
-    if (result !== null) {
-      console.log(`[API] credit spent (legacy) for ${uid}: ${result + 1} -> ${result}`);
-      return res.json({ ok: true, source: 'legacy', balance: result });
-    }
-
-    res.status(402).json({ ok: false, error: 'insufficient_credits', balance: 0 });
-  } catch (error) {
-    console.error('[API] Error spending credit:', sanitizeError(error));
-    res.status(500).json({ ok: false, error: sanitizeError(error) });
-  }
-});
+registerCreditRoutes(app);
 
 app.post('/generate/title', async (req, res) => {
   try {
