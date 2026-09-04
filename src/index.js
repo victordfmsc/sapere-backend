@@ -4,6 +4,7 @@ const { generateQueue } = require('./queues');
 const { generateTitle } = require('./services/openai');
 const { sanitizeError } = require('./env');
 const { registerCreditRoutes } = require('./credits');
+const { startWatchdog } = require('./watchdog');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,6 +12,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 initFirebase();
+startWatchdog(getDb);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
